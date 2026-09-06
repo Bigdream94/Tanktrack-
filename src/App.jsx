@@ -585,4 +585,485 @@ function NewProduct({ onCancel, onSave }) {
         <Field label="Type de stock">
           <div className="row-gap">
             {[
-              ["carbura
+                ["carburant", "Carburant", Fuel],
+                ["gaz", "Gaz", Flame],
+              ].map(([key, label, Icon]) => (
+<button key={key} className={type === key ? "toggle-btn flex1 active" : "toggle-btn flex1"} onClick={() => setType(key)}>
+                <Icon size={14} />
+                {label}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <div className="row-gap">
+          <Field label="Capacité totale">
+            <input className="input" type="number" value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="35000" />
+          </Field>
+          <Field label="Unité">
+            <select className="input" value={unit} onChange={(e) => setUnit(e.target.value)}>
+              {UNITS.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <div className="row-gap">
+          <Field label="Stock actuel">
+            <input className="input" type="number" value={initialStock} onChange={(e) => setInitialStock(e.target.value)} placeholder="0" />
+          </Field>
+          <Field label="Seuil d'alerte">
+            <input className="input" type="number" value={alertThreshold} onChange={(e) => setAlertThreshold(e.target.value)} placeholder="5000" />
+          </Field>
+        </div>
+        <div className="row-gap pt-2">
+          <button className="btn-ghost flex1" onClick={onCancel}>
+            Annuler
+          </button>
+          <button
+            className="btn-primary flex1"
+            disabled={!canSave}
+            onClick={() =>
+              onSave({
+                name: name.trim(),
+                type,
+                capacity: Number(capacity),
+                unit,
+                initial_stock: Number(initialStock) || 0,
+                alert_threshold: Number(alertThreshold) || Number(capacity) * 0.15,
+              })
+            }
+          >
+            Créer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Product detail ---------------- */
+
+function ProductDetail({ product, movements, stock, onBack, onAddMovement, onDeleteMovement, onDeleteProduct, onSetPhysical, isAdmin }) {
+  const [showForm, setShowForm] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  if (!product) {
+    return (
+      <div className="muted small">
+        Ce stock n'existe plus.{" "}
+        <button className="link" onClick={onBack}>
+          Retour
+        </button>
+      </div>
+    );
+  }
+
+  const capacity = Number(product.capacity);
+  const pct = capacity > 0 ? Math.max(0, Math.min(100, (stock / capacity) * 100)) : 0;
+  const alertPct = product.alert_threshold && capacity ? (Number(product.alert_threshold) / capacity) * 100 : 15;
+  const color = levelColor(pct, alertPct);
+  const ecart = product.last_physical !== null && product.last_physical !== undefined ? Number(product.last_physical) - stock : null;
+  const sorted = [...movements].sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  return (
+    <div>
+      <div className="row-between wrap mb-6">
+        <div>
+          <div className="row-gap-sm mb-1">
+            <h2 className="h2">{product.name}</h2>
+            <span className="tag mono">{product.type}</span>
+          </div>
+          <div className="row-gap-sm mono">
+            <span className="stock-num large" style={{ color }}>
+              {stock.toLocaleString("fr-FR")}
+            </span>
+            <span className="muted small">
+              / {capacity.toLocaleString("fr-FR")} {product.unit} · {Math.round(pct)}%
+            </span>
+          </div>
+          {ecart !== null && Math.abs(ecart) > 0 && (
+            <div className={Math.abs(ecart) > capacity * 0.01 ? "ecart-text danger" : "ecart-text"}>
+              Écart jauge physique vs calculé : {ecart > 0 ? "+" : ""}
+              {ecart.toLocaleString("fr-FR")} {product.unit}
+              {product.last_physical_date ? ` (relevé du ${product.last_physical_date})` : ""}
+            </div>
+          )}
+        </div>
+        <div className="row-gap">
+          <button className="btn-soft green" onClick={() => setShowForm("entree")}>
+            <ArrowDownCircle size={15} />
+            Entrée
+          </button>
+          <button className="btn-soft red" onClick={() => setShowForm("sortie")}>
+            <ArrowUpCircle size={15} />
+            Sortie
+          </button>
+          <button className="btn-soft neutral" onClick={() => setShowForm("jauge")}>
+            <Gauge size={15} />
+            Jauge
+          </button>
+        </div>
+      </div>
+
+      <div className="bar large mb-8">
+        <div className="bar-fill" style={{ width: `${pct}%`, background: color }} />
+      </div>
+
+      {showForm === "entree" && (
+        <MovementForm kind="entree" unit={product.unit} onCancel={() => setShowForm(null)} onSave={(mv) => { onAddMovement({ ...mv, kind: "entree" }); setShowForm(null); }} />
+      )}
+      {showForm === "sortie" && (
+        <MovementForm kind="sortie" unit={product.unit} onCancel={() => setShowForm(null)} onSave={(mv) => { onAddMovement({ ...mv, kind: "sortie" }); setShowForm(null); }} />
+      )}
+      {showForm === "jauge" && (
+        <JaugeForm unit={product.unit} current={product.last_physical ?? stock} onCancel={() => setShowForm(null)} onSave={(level) => { onSetPhysical(level); setShowForm(null); }} />
+      )}
+
+      <div className="row-between mb-3">
+        <h3 className="h3">Historique des mouvements</h3>
+        <span className="muted small mono">{movements.length} entrée(s)</span>
+      </div>
+
+      {sorted.length === 0 ? (
+        <div className="empty-line">Aucun mouvement enregistré pour ce stock.</div>
+      ) : (
+        <div className="stack-sm">
+          {sorted.map((m) => (
+            <div key={m.id} className="movement-row">
+              <div className="row-gap-sm">
+                {m.kind === "entree" ? <ArrowDownCircle size={16} color="#4FAE7A" /> : <ArrowUpCircle size={16} color="#E1543F" />}
+                <div>
+                  <div className="small">{m.note || (m.kind === "entree" ? "Entrée" : "Sortie")}</div>
+                  <div className="muted tiny mono">
+                    {m.date}
+                    {m.added_by ? ` · ${m.added_by}` : ""}
+                  </div>
+                </div>
+              </div>
+              <div className="row-gap-sm">
+                <span className="mono small font-medium" style={{ color: m.kind === "entree" ? "#4FAE7A" : "#E1543F" }}>
+                  {m.kind === "entree" ? "+" : "−"}
+                  {Number(m.quantity).toLocaleString("fr-FR")} {product.unit}
+                </span>
+                <button className="icon-btn faint" onClick={() => onDeleteMovement(m.id)}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="danger-zone">
+          {!confirmDelete ? (
+            <button className="link danger-link" onClick={() => setConfirmDelete(true)}>
+              Supprimer ce stock
+            </button>
+          ) : (
+            <div className="row-gap-sm">
+              <span className="danger-text">Supprimer définitivement « {product.name} » et son historique ?</span>
+              <button className="link danger-link" onClick={onDeleteProduct}>
+                Confirmer
+              </button>
+              <button className="link" onClick={() => setConfirmDelete(false)}>
+                Annuler
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MovementForm({ kind, unit, onCancel, onSave }) {
+  const [quantity, setQuantity] = useState("");
+  const [date, setDate] = useState(todayStr());
+  const [note, setNote] = useState("");
+  const canSave = Number(quantity) > 0;
+
+  return (
+    <div className="form-box">
+      <div className="row-between mb-3">
+        <div className="small font-medium">{kind === "entree" ? "Nouvelle entrée" : "Nouvelle sortie"}</div>
+        <button className="icon-btn faint" onClick={onCancel}>
+          <X size={16} />
+        </button>
+      </div>
+      <div className="row-gap mb-3">
+        <Field label={`Quantité (${unit})`}>
+          <input className="input" type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" autoFocus />
+        </Field>
+        <Field label="Date">
+          <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </Field>
+      </div>
+      <Field label={kind === "entree" ? "Fournisseur / origine (optionnel)" : "Destination / usage (optionnel)"}>
+        <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={kind === "entree" ? "Dépotage camion-citerne" : "Véhicule / groupe électrogène"} />
+      </Field>
+      <div className="row-gap mt-3">
+        <button className="btn-ghost flex1" onClick={onCancel}>
+          Annuler
+        </button>
+        <button className="btn-primary flex1" disabled={!canSave} onClick={() => onSave({ quantity: Number(quantity), date, note: note.trim() })}>
+          Enregistrer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function JaugeForm({ unit, current, onCancel, onSave }) {
+  const [level, setLevel] = useState(current ?? "");
+  return (
+    <div className="form-box">
+      <div className="row-between mb-3">
+        <div className="small font-medium">Relevé de jauge physique</div>
+        <button className="icon-btn faint" onClick={onCancel}>
+          <X size={16} />
+        </button>
+      </div>
+      <p className="muted tiny mb-3">Enregistre le niveau lu physiquement sur la cuve pour le comparer au stock calculé à partir des mouvements.</p>
+      <Field label={`Niveau relevé (${unit})`}>
+        <input className="input" type="number" value={level} onChange={(e) => setLevel(e.target.value)} placeholder="0" autoFocus />
+      </Field>
+      <div className="row-gap mt-3">
+        <button className="btn-ghost flex1" onClick={onCancel}>
+          Annuler
+        </button>
+        <button className="btn-primary flex1" disabled={!(Number(level) >= 0 && level !== "")} onClick={() => onSave(Number(level))}>
+          Enregistrer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Reports ---------------- */
+
+function Reports({ products, movements, workspaceName }) {
+  const [productFilter, setProductFilter] = useState("tous");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  const productName = (id) => products.find((p) => p.id === id)?.name || "—";
+  const productUnit = (id) => products.find((p) => p.id === id)?.unit || "";
+
+  const filtered = useMemo(() => {
+    return movements
+      .filter((m) => (productFilter === "tous" ? true : m.product_id === productFilter))
+      .filter((m) => (from ? m.date >= from : true))
+      .filter((m) => (to ? m.date <= to : true))
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [movements, productFilter, from, to]);
+
+  const totals = filtered.reduce(
+    (acc, m) => {
+      if (m.kind === "entree") acc.entrees += Number(m.quantity);
+      else acc.sorties += Number(m.quantity);
+      return acc;
+    },
+    { entrees: 0, sorties: 0 }
+  );
+
+  const exportExcel = () => {
+    const rows = filtered.map((m) => ({
+      Date: m.date,
+      Stock: productName(m.product_id),
+      Type: m.kind === "entree" ? "Entrée" : "Sortie",
+      Quantité: Number(m.quantity),
+      Unité: productUnit(m.product_id),
+      Note: m.note || "",
+      "Enregistré par": m.added_by || "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Mouvements");
+    XLSX.writeFile(wb, `rapport-stock-${todayStr()}.xlsx`);
+  };
+
+  return (
+    <div>
+      <div className="row-between wrap mb-5 no-print">
+        <h2 className="h2">Rapports</h2>
+        <div className="row-gap">
+          <button className="btn-soft neutral" onClick={exportExcel}>
+            <FileDown size={15} />
+            Excel
+          </button>
+          <button className="btn-soft neutral" onClick={() => window.print()}>
+            <Printer size={15} />
+            PDF
+          </button>
+        </div>
+      </div>
+
+      <div className="row-gap wrap mb-5 no-print">
+        <select className="input auto" value={productFilter} onChange={(e) => setProductFilter(e.target.value)}>
+          <option value="tous">Tous les stocks</option>
+          {products.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <input className="input auto" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <input className="input auto" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+      </div>
+
+      <div className="print-area">
+        <div className="print-only mb-4">
+          <div className="h2">{workspaceName}</div>
+          <div className="muted small">
+            Rapport de mouvements — {from || "début"} au {to || "aujourd'hui"}
+          </div>
+        </div>
+
+        <div className="report-totals">
+          <div className="report-card">
+            <div className="muted tiny mb-1">Total entrées</div>
+            <div className="mono large font-medium" style={{ color: "#4FAE7A" }}>
+              +{totals.entrees.toLocaleString("fr-FR")}
+            </div>
+          </div>
+          <div className="report-card">
+            <div className="muted tiny mb-1">Total sorties</div>
+            <div className="mono large font-medium" style={{ color: "#E1543F" }}>
+              −{totals.sorties.toLocaleString("fr-FR")}
+            </div>
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="empty-line no-print">Aucun mouvement pour cette période.</div>
+        ) : (
+          <table className="report-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Stock</th>
+                <th>Type</th>
+                <th className="text-right">Quantité</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((m) => (
+                <tr key={m.id}>
+                  <td className="mono tiny">{m.date}</td>
+                  <td>{productName(m.product_id)}</td>
+                  <td>
+                    <span style={{ color: m.kind === "entree" ? "#4FAE7A" : "#E1543F" }}>{m.kind === "entree" ? "Entrée" : "Sortie"}</span>
+                  </td>
+                  <td className="text-right mono">
+                    {m.kind === "entree" ? "+" : "−"}
+                    {Number(m.quantity).toLocaleString("fr-FR")} {productUnit(m.product_id)}
+                  </td>
+                  <td className="muted">{m.note || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Team management ---------------- */
+
+function UsersAdmin({ members, onInvite, onRemove }) {
+  const [showForm, setShowForm] = useState(false);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("magasinier");
+  const [error, setError] = useState("");
+  const canSave = name.trim() && /\S+@\S+\.\S+/.test(email);
+
+  const submit = async () => {
+    setError("");
+    const { error } = await onInvite({ email: email.trim().toLowerCase(), name: name.trim(), role });
+    if (error) {
+      setError(/duplicate/i.test(error.message) ? "Cet email est déjà invité dans cet espace." : error.message);
+      return;
+    }
+    setShowForm(false);
+    setName("");
+    setEmail("");
+    setRole("magasinier");
+  };
+
+  return (
+    <div className="panel-narrow">
+      <div className="row-between mb-5">
+        <h2 className="h2">Équipe</h2>
+        {!showForm && (
+          <button className="btn-primary" onClick={() => setShowForm(true)}>
+            <Plus size={15} />
+            Inviter
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <div className="form-box mb-5">
+          <div className="stack">
+            <Field label="Nom">
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom complet" autoFocus />
+            </Field>
+            <Field label="Email">
+              <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="collegue@exemple.com" />
+            </Field>
+            <Field label="Rôle">
+              <div className="row-gap">
+                {[
+                  ["magasinier", "Magasinier"],
+                  ["responsable", "Responsable"],
+                ].map(([key, label]) => (
+                  <button key={key} className={role === key ? "toggle-btn flex1 active" : "toggle-btn flex1"} onClick={() => setRole(key)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </div>
+          {error && <div className="error-text mt-2">{error}</div>}
+          <p className="muted tiny mt-3">
+            La personne doit créer un compte TankTrack avec exactement cet email — elle sera automatiquement rattachée à cet espace.
+          </p>
+          <div className="row-gap mt-3">
+            <button className="btn-ghost flex1" onClick={() => setShowForm(false)}>
+              Annuler
+            </button>
+            <button className="btn-primary flex1" disabled={!canSave} onClick={submit}>
+              Envoyer l'invitation
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="stack-sm">
+        {members.map((m) => (
+          <div key={m.id} className="member-row">
+            <div className="row-gap-sm">
+              {m.user_id ? <Users size={15} className="icon-muted" /> : <Mail size={15} className="icon-muted" />}
+              <div>
+                <div className="small font-medium">{m.name || m.invited_email}</div>
+                <div className="muted tiny mono">
+                  {m.role}
+                  {!m.user_id && " · invitation en attente"}
+                </div>
+              </div>
+            </div>
+            <button className="icon-btn faint" onClick={() => onRemove(m.id)}>
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+                                            }
